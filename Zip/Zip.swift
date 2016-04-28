@@ -41,209 +41,6 @@ public class Zip {
     public init () {
     }
     
-    public class func zipFileList(zipFilePath: NSURL, password: String?) throws -> Array<String> {
-        let fileManager = NSFileManager.defaultManager()
-        
-        // Check whether a zip file exists at path.
-        guard let path = zipFilePath.path else {
-            throw ZipError.FileNotFound
-        }
-        if fileManager.fileExistsAtPath(path) == false || !["zip", "cbz"].contains(zipFilePath.pathExtension!) {
-            throw ZipError.FileNotFound
-        }
-        
-        var ret: Int32 = 0
-        var crc_ret: Int32 = 0
-        var fileList: Array<String> = []
-
-        // Begin unzipping
-        let zip = unzOpen64(path)
-        if unzGoToFirstFile(zip) != UNZ_OK {
-            throw ZipError.UnzipFail
-        }
-        repeat {
-            if let cPassword = password?.cStringUsingEncoding(NSASCIIStringEncoding) {
-                ret = unzOpenCurrentFilePassword(zip, cPassword)
-            }
-            else {
-                ret = unzOpenCurrentFile(zip);
-            }
-            if ret != UNZ_OK {
-                throw ZipError.UnzipFail
-            }
-            var fileInfo = unz_file_info64()
-            memset(&fileInfo, 0, sizeof(unz_file_info))
-            ret = unzGetCurrentFileInfo64(zip, &fileInfo, nil, 0, nil, 0, nil, 0)
-            if ret != UNZ_OK {
-                unzCloseCurrentFile(zip)
-                throw ZipError.UnzipFail
-            }
-            let fileNameSize = Int(fileInfo.size_filename) + 1
-            let fileName = UnsafeMutablePointer<CChar>.alloc(fileNameSize)
-            if fileName == nil {
-                throw ZipError.UnzipFail
-            }
-            unzGetCurrentFileInfo64(zip, &fileInfo, fileName, UInt(fileNameSize), nil, 0, nil, 0)
-            fileName[Int(fileInfo.size_filename)] = 0
-            
-            guard var pathString = String(CString: fileName, encoding: NSUTF8StringEncoding) else {
-                throw ZipError.UnzipFail
-            }
-            
-            free(fileName)
-            
-            if pathString.rangeOfCharacterFromSet(NSCharacterSet(charactersInString: "/\\")) != nil {
-                pathString = pathString.stringByReplacingOccurrencesOfString("\\", withString: "/")
-            }
-            
-            var invisible = false
-            
-            for s in pathString.componentsSeparatedByString("/") {
-                if s.hasPrefix(".") {
-                    invisible = true
-                }
-            }
-            
-            if !pathString.hasSuffix("/") && !invisible {
-                fileList.append(pathString)
-            }
-            
-            crc_ret = unzCloseCurrentFile(zip)
-            if crc_ret == UNZ_CRCERROR {
-                throw ZipError.UnzipFail
-            }
-            ret = unzGoToNextFile(zip)
-            
-        } while (ret == UNZ_OK && ret != UNZ_END_OF_LIST_OF_FILE)
-        
-        return fileList
-    }
-    
-    public class func dataForFileEntry(zipFilePath: NSURL, fileEntryName: String, password: String?, progress: ((progress: Double) -> ())?) throws -> NSData? {
-        
-        // File manager
-        let fileManager = NSFileManager.defaultManager()
-        
-        // Check whether a zip file exists at path.
-        guard let path = zipFilePath.path else {
-            throw ZipError.FileNotFound
-        }
-        if fileManager.fileExistsAtPath(path) == false || !["zip", "cbz"].contains(zipFilePath.pathExtension!) {
-            throw ZipError.FileNotFound
-        }
-        
-        // Unzip set up
-        var ret: Int32 = 0
-        var crc_ret: Int32 = 0
-        let bufferSize: UInt32 = 4096
-        var buffer = Array<CUnsignedChar>(count: Int(bufferSize), repeatedValue: 0)
-        
-        // Progress handler set up
-        var totalSize: Double = 0.0
-        var currentPosition: Double = 0.0
-        let fileAttributes = try fileManager.attributesOfItemAtPath(path)
-        if let attributeFileSize = fileAttributes[NSFileSize] as? Double {
-            totalSize += attributeFileSize
-        }
-        
-        let progressTracker = NSProgress(totalUnitCount: Int64(totalSize))
-        progressTracker.cancellable = false
-        progressTracker.pausable = false
-        progressTracker.kind = NSProgressKindFile
-        
-        let data = NSMutableData.init()
-        
-        // Begin unzipping
-        let zip = unzOpen64(path)
-        if unzGoToFirstFile(zip) != UNZ_OK {
-            throw ZipError.UnzipFail
-        }
-        repeat {
-            if let cPassword = password?.cStringUsingEncoding(NSASCIIStringEncoding) {
-                ret = unzOpenCurrentFilePassword(zip, cPassword)
-            }
-            else {
-                ret = unzOpenCurrentFile(zip);
-            }
-            if ret != UNZ_OK {
-                throw ZipError.UnzipFail
-            }
-            var fileInfo = unz_file_info64()
-            memset(&fileInfo, 0, sizeof(unz_file_info))
-            ret = unzGetCurrentFileInfo64(zip, &fileInfo, nil, 0, nil, 0, nil, 0)
-            if ret != UNZ_OK {
-                unzCloseCurrentFile(zip)
-                throw ZipError.UnzipFail
-            }
-            currentPosition += Double(fileInfo.compressed_size)
-            let fileNameSize = Int(fileInfo.size_filename) + 1
-            let fileName = UnsafeMutablePointer<CChar>.alloc(fileNameSize)
-            if fileName == nil {
-                throw ZipError.UnzipFail
-            }
-            unzGetCurrentFileInfo64(zip, &fileInfo, fileName, UInt(fileNameSize), nil, 0, nil, 0)
-            fileName[Int(fileInfo.size_filename)] = 0
-            guard var pathString = String(CString: fileName, encoding: NSUTF8StringEncoding) else {
-                throw ZipError.UnzipFail
-            }
-
-            free(fileName)
-            if pathString.rangeOfCharacterFromSet(NSCharacterSet(charactersInString: "/\\")) != nil {
-                pathString = pathString.stringByReplacingOccurrencesOfString("\\", withString: "/")
-            }
-            
-            if pathString == fileEntryName
-            {
-                
-                
-                while (true) {
-                    let readBytes = unzReadCurrentFile(zip, &buffer, bufferSize)
-                    if readBytes > 0 {
-                        data.appendBytes(buffer, length: Int(readBytes))
-                    }
-                    else {
-                        break
-                    }
-                }
-                
-            }
-            
-            crc_ret = unzCloseCurrentFile(zip)
-            if crc_ret == UNZ_CRCERROR {
-                throw ZipError.UnzipFail
-            }
-            
-            if data.length > 0 {
-                ret = UNZ_END_OF_LIST_OF_FILE
-            } else {
-                ret = unzGoToNextFile(zip)
-            }
-            
-            // Update progress handler
-            if let progressHandler = progress{
-                progressHandler(progress: (currentPosition/totalSize))
-            }
-            
-            progressTracker.completedUnitCount = Int64(currentPosition)
-            
-        } while (ret == UNZ_OK && ret != UNZ_END_OF_LIST_OF_FILE)
-        
-        // Completed. Update progress handler.
-        if let progressHandler = progress{
-            progressHandler(progress: 1.0)
-        }
-        
-        progressTracker.completedUnitCount = Int64(totalSize)
-        
-        if data.length > 0
-        {
-            return data as NSData
-        } else {
-            return nil
-        }
-    }
-
-    
     // MARK: Unzip
     
     /**
@@ -506,6 +303,234 @@ public class Zip {
         progressTracker.completedUnitCount = Int64(totalSize)
     }
     
+    // MARK: ZipFileList
     
+    /**
+     List of files in zip
+     
+     - parameter zipFilePath: Local file path of zipped file. NSURL.
+     - parameter password:    Optional password if file is protected.
+     
+     - throws: Error if unzipping fails or if fail is not found. Can be printed with a description variable.
+     
+     */
+    
+    public class func zipFileList(zipFilePath: NSURL, password: String?) throws -> Array<String> {
+        let fileManager = NSFileManager.defaultManager()
+        
+        // Check whether a zip file exists at path.
+        guard let path = zipFilePath.path else {
+            throw ZipError.FileNotFound
+        }
+        if fileManager.fileExistsAtPath(path) == false || !["zip", "cbz"].contains(zipFilePath.pathExtension!) {
+            throw ZipError.FileNotFound
+        }
+        
+        var ret: Int32 = 0
+        var crc_ret: Int32 = 0
+        var fileList: Array<String> = []
+        
+        // Begin unzipping
+        let zip = unzOpen64(path)
+        if unzGoToFirstFile(zip) != UNZ_OK {
+            throw ZipError.UnzipFail
+        }
+        repeat {
+            if let cPassword = password?.cStringUsingEncoding(NSASCIIStringEncoding) {
+                ret = unzOpenCurrentFilePassword(zip, cPassword)
+            }
+            else {
+                ret = unzOpenCurrentFile(zip);
+            }
+            if ret != UNZ_OK {
+                throw ZipError.UnzipFail
+            }
+            var fileInfo = unz_file_info64()
+            memset(&fileInfo, 0, sizeof(unz_file_info))
+            ret = unzGetCurrentFileInfo64(zip, &fileInfo, nil, 0, nil, 0, nil, 0)
+            if ret != UNZ_OK {
+                unzCloseCurrentFile(zip)
+                throw ZipError.UnzipFail
+            }
+            let fileNameSize = Int(fileInfo.size_filename) + 1
+            let fileName = UnsafeMutablePointer<CChar>.alloc(fileNameSize)
+            if fileName == nil {
+                throw ZipError.UnzipFail
+            }
+            unzGetCurrentFileInfo64(zip, &fileInfo, fileName, UInt(fileNameSize), nil, 0, nil, 0)
+            fileName[Int(fileInfo.size_filename)] = 0
+            
+            guard var pathString = String(CString: fileName, encoding: NSUTF8StringEncoding) else {
+                throw ZipError.UnzipFail
+            }
+            
+            free(fileName)
+            
+            if pathString.rangeOfCharacterFromSet(NSCharacterSet(charactersInString: "/\\")) != nil {
+                pathString = pathString.stringByReplacingOccurrencesOfString("\\", withString: "/")
+            }
+            
+            var invisible = false
+            
+            for s in pathString.componentsSeparatedByString("/") {
+                if s.hasPrefix(".") {
+                    invisible = true
+                }
+            }
+            
+            if !pathString.hasSuffix("/") && !invisible {
+                fileList.append(pathString)
+            }
+            
+            crc_ret = unzCloseCurrentFile(zip)
+            if crc_ret == UNZ_CRCERROR {
+                throw ZipError.UnzipFail
+            }
+            ret = unzGoToNextFile(zip)
+            
+        } while (ret == UNZ_OK && ret != UNZ_END_OF_LIST_OF_FILE)
+        
+        return fileList
+    }
+    
+    // MARK: DataForFileEntry
+    
+    /**
+     NSData for specific file in zip
+     
+     - parameter zipFilePath: Local file path of zipped file. NSURL.
+     - parameter fileEntryName: Name of file inside zip. String.
+     - parameter password:    Optional password if file is protected.
+     - parameter progress: A progress closure called after unzipping each file in the archive. Double value betweem 0 and 1.
+     
+     - throws: Error if unzipping fails or if fail is not found. Can be printed with a description variable.
+     
+     - notes: Supports implicit progress composition
+     */
+    
+    public class func dataForFileEntry(zipFilePath: NSURL, fileEntryName: String, password: String?, progress: ((progress: Double) -> ())?) throws -> NSData? {
+        
+        // File manager
+        let fileManager = NSFileManager.defaultManager()
+        
+        // Check whether a zip file exists at path.
+        guard let path = zipFilePath.path else {
+            throw ZipError.FileNotFound
+        }
+        if fileManager.fileExistsAtPath(path) == false || !["zip", "cbz"].contains(zipFilePath.pathExtension!) {
+            throw ZipError.FileNotFound
+        }
+        
+        // Unzip set up
+        var ret: Int32 = 0
+        var crc_ret: Int32 = 0
+        let bufferSize: UInt32 = 4096
+        var buffer = Array<CUnsignedChar>(count: Int(bufferSize), repeatedValue: 0)
+        
+        // Progress handler set up
+        var totalSize: Double = 0.0
+        var currentPosition: Double = 0.0
+        let fileAttributes = try fileManager.attributesOfItemAtPath(path)
+        if let attributeFileSize = fileAttributes[NSFileSize] as? Double {
+            totalSize += attributeFileSize
+        }
+        
+        let progressTracker = NSProgress(totalUnitCount: Int64(totalSize))
+        progressTracker.cancellable = false
+        progressTracker.pausable = false
+        progressTracker.kind = NSProgressKindFile
+        
+        let data = NSMutableData.init()
+        
+        // Begin unzipping
+        let zip = unzOpen64(path)
+        if unzGoToFirstFile(zip) != UNZ_OK {
+            throw ZipError.UnzipFail
+        }
+        repeat {
+            if let cPassword = password?.cStringUsingEncoding(NSASCIIStringEncoding) {
+                ret = unzOpenCurrentFilePassword(zip, cPassword)
+            }
+            else {
+                ret = unzOpenCurrentFile(zip);
+            }
+            if ret != UNZ_OK {
+                throw ZipError.UnzipFail
+            }
+            var fileInfo = unz_file_info64()
+            memset(&fileInfo, 0, sizeof(unz_file_info))
+            ret = unzGetCurrentFileInfo64(zip, &fileInfo, nil, 0, nil, 0, nil, 0)
+            if ret != UNZ_OK {
+                unzCloseCurrentFile(zip)
+                throw ZipError.UnzipFail
+            }
+            currentPosition += Double(fileInfo.compressed_size)
+            let fileNameSize = Int(fileInfo.size_filename) + 1
+            let fileName = UnsafeMutablePointer<CChar>.alloc(fileNameSize)
+            if fileName == nil {
+                throw ZipError.UnzipFail
+            }
+            unzGetCurrentFileInfo64(zip, &fileInfo, fileName, UInt(fileNameSize), nil, 0, nil, 0)
+            fileName[Int(fileInfo.size_filename)] = 0
+            guard var pathString = String(CString: fileName, encoding: NSUTF8StringEncoding) else {
+                throw ZipError.UnzipFail
+            }
+            
+            free(fileName)
+            if pathString.rangeOfCharacterFromSet(NSCharacterSet(charactersInString: "/\\")) != nil {
+                pathString = pathString.stringByReplacingOccurrencesOfString("\\", withString: "/")
+            }
+            
+            if pathString == fileEntryName
+            {
+                
+                
+                while (true) {
+                    let readBytes = unzReadCurrentFile(zip, &buffer, bufferSize)
+                    if readBytes > 0 {
+                        data.appendBytes(buffer, length: Int(readBytes))
+                    }
+                    else {
+                        break
+                    }
+                }
+                
+            }
+            
+            crc_ret = unzCloseCurrentFile(zip)
+            if crc_ret == UNZ_CRCERROR {
+                throw ZipError.UnzipFail
+            }
+            
+            if data.length > 0 {
+                ret = UNZ_END_OF_LIST_OF_FILE
+            } else {
+                ret = unzGoToNextFile(zip)
+            }
+            
+            // Update progress handler
+            if let progressHandler = progress{
+                progressHandler(progress: (currentPosition/totalSize))
+            }
+            
+            progressTracker.completedUnitCount = Int64(currentPosition)
+            
+        } while (ret == UNZ_OK && ret != UNZ_END_OF_LIST_OF_FILE)
+        
+        // Completed. Update progress handler.
+        if let progressHandler = progress{
+            progressHandler(progress: 1.0)
+        }
+        
+        progressTracker.completedUnitCount = Int64(totalSize)
+        
+        if data.length > 0
+        {
+            return data as NSData
+        } else {
+            return nil
+        }
+    }
+
     
 }
