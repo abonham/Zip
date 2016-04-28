@@ -209,5 +209,40 @@ class ZipTests: XCTestCase {
         }
     }
     
+    func testFileListFromZip() {
+        do {
+            let bookURL = NSBundle(forClass: ZipTests.self).URLForResource("bb8", withExtension: "zip")!
+            let testFileList = try Zip.zipFileList(bookURL, password: nil)
+            XCTAssertTrue(testFileList.contains("subDir/r2W9yu9.gif"))
+            XCTAssertTrue(testFileList.contains("kYkLkPf.gif"))
+            XCTAssertTrue(testFileList.contains("3crBXeO.gif"))
+            XCTAssertFalse(testFileList.contains("__MACOSX/._3crBXeO.gif"))
+        } catch {
+            XCTFail()
+        }
+    }
+    
+    func testBenchmarkFileList() {
+        let bookURL = NSBundle(forClass: ZipTests.self).URLForResource("bb8", withExtension: "zip")!
+        measureBlock {
+            do {
+                _ = try Zip.zipFileList(bookURL, password: nil)
+            } catch {
+                
+            }
+        }
+    }
+    
+    func testDataForFileEntry() {
+        do {
+            let bookURL = NSBundle(forClass: ZipTests.self).URLForResource("bb8", withExtension: "zip")!
+            let data = try Zip.dataForFileEntry(bookURL, fileEntryName: "3crBXeO.gif", password: nil, progress: nil)
+            let imageURL1 = NSBundle(forClass: ZipTests.self).URLForResource("3crBXeO", withExtension: "gif")!
+            let compare = NSData(contentsOfURL: imageURL1)
+            XCTAssertTrue(data == compare)
+        } catch {
+            XCTFail()
+        }
+    }
     
 }
